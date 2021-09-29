@@ -1,0 +1,51 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: contosocontainerregistry4855.azurecr.io
+        username: ${{ secrets.acr_contosocontainerregistry4855_username }}
+        password: ${{ secrets.acr_contosocontainerregistry4855_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/azure-vote" -f  "azure-vote/Dockerfile" -t contosocontainerregistry4855.azurecr.io/contosovideo:${{ github.sha }} --label dockerfile-path=azure-vote/Dockerfile
+        docker push contosocontainerregistry4855.azurecr.io/contosovideo:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_contosovideo_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep contoso-video9b61 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace contoso-video9b61`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: contoso-video9b61
+        container-registry-url: contosocontainerregistry4855.azurecr.io
+        container-registry-username: ${{ secrets.acr_contosocontainerregistry4855_username }}
+        container-registry-password: ${{ secrets.acr_contosocontainerregistry4855_password }}
+        secret-name: contosovideodockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: contoso-video9b61
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+          manifests/ingress.yml
+        images: |
+          contosocontainerregistry4855.azurecr.io/contosovideo:${{ github.sha }}
+        imagepullsecrets: |
+          contosovideodockerauth
